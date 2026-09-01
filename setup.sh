@@ -1,0 +1,3 @@
+#!/bin/bash
+
+# EM BREVE O SETUP ESTARÁ PRONTO!
