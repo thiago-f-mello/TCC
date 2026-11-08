@@ -17,6 +17,10 @@ if [ ! -d "$HOME/miniconda3" ]; then
     conda init bash
 fi
 
+# Aceitar os termos de serviço do conda automaticamente (evita o erro do ToS)
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main --yes 2>/dev/null || true
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r --yes 2>/dev/null || true
+
 # 2. Criar ambiente Conda 'db_env' (Python 3.8, PostgreSQL, Java 11, Maven)
 echo "Criando/verificando ambiente Conda 'db_env'..."
 source "$HOME/miniconda3/bin/activate"
