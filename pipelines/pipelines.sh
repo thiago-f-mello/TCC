@@ -88,7 +88,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     PARSED_DC="$ROOT_DIR/dcs/raw/dcs_${DISCOVERY}_parsed_${i}.txt"
     FILTERED_DC="$ROOT_DIR/dcs/processed/dcs_${DISCOVERY}_filtered_${i}.txt"
 
-    # --- PASSO 1: DESCOBERTA DE DCs ---
+# --- PASSO 1: DESCOBERTA DE DCs E PARSER ---
     case "$DISCOVERY" in
         dcfinder)
             LINES="5000"
@@ -138,10 +138,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
             ;;
     esac
 
-    # --- PASSO 2: FILTRAGEM (PRUNING) ---
-    python3 "$ROOT_DIR/src/filters/redundancy_filter.py" "$PARSED_DC" "$FILTERED_DC" "$DATASET_ATUAL"
-
-    # --- PASSO 3: REPARO / LIMPEZA ---
+    # --- PASSO 2: REPARO / LIMPEZA DIRETO COM O PARSED_DC ---
     SAIDA_CSV="$ROOT_DIR/dcs/processed/${DATASET}_limpo_${DISCOVERY}_${CLEANING}_v${i}.csv"
 
     set +e
@@ -150,18 +147,16 @@ for i in $(seq 1 $MAX_ITERATIONS); do
             dropdb holo 2>/dev/null || true
             createdb -O holocleanuser holo 2>/dev/null || true
             if [ "$DISCOVERY" = "lima" ]; then
-                python3 "$ROOT_DIR/src/repair/lima_repair.py" "$FILTERED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
+                python3 "$ROOT_DIR/src/repair/lima_repair.py" "$PARSED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
             else
-                python3 "$ROOT_DIR/src/repair/meta_repair.py" "$FILTERED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
+                python3 "$ROOT_DIR/src/repair/meta_repair.py" "$PARSED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
             fi
             ;;
         uniclean)
-            # Ajuste o script Python correspondente ao uniclean se necessário
-            python3 "$ROOT_DIR/src/repair/uniclean_repair.py" "$FILTERED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
+            python3 "$ROOT_DIR/src/repair/uniclean_repair.py" "$PARSED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
             ;;
         horizon)
-            # Ajuste o script Python correspondente ao horizon se necessário
-            python3 "$ROOT_DIR/src/repair/horizon_repair.py" "$FILTERED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
+            python3 "$ROOT_DIR/src/repair/horizon_repair.py" "$PARSED_DC" "$SAIDA_CSV" "$DATASET_ATUAL" "$GABARITO_REAL"
             ;;
         *)
             echo "Erro: Ferramenta de limpeza inválida ($CLEANING)."

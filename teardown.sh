@@ -1,35 +1,28 @@
 #!/bin/bash
-# teardown.sh - Limpeza completa do ambiente, caches e pastas deps/
+# teardown.sh - Faxina completa na /home e no /tmp da máquina atual
+set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPS_DIR="$PROJECT_ROOT/deps"
+JAR_DIR="$PROJECT_ROOT/algorithmJARs"
+WORK_DIR="/tmp/$USER/tcc_env"
 
-echo "Iniciando limpeza total do ambiente TCC..."
+echo "🔥 Iniciando faxina geral do ambiente..."
 
-# 1. Desativar ambientes Conda ativos
+# 1. Desativar Conda se estiver ativo
 if command -v conda &> /dev/null; then
-    echo "Desativando Conda..."
     conda deactivate 2>/dev/null || true
 fi
 
-# 2. Remover Miniconda3 e .conda do home
-echo "Removendo Miniconda3 e .conda..."
-rm -rf ~/miniconda3 ~/.conda
+# 2. Limpar resquícios antigos da /home (libera a cota)
+echo "🗑️ Removendo instalações antigas da /home..."
+rm -rf "$HOME/miniconda3" "$HOME/.conda" "$HOME/.pyenv"
+rm -rf "$HOME/.m2" "$HOME/.cache/pip" "$HOME/.cache/conda"
+rm -rf "$PROJECT_ROOT/deps" "$JAR_DIR"
 
-# 3. Limpar diretório deps/ do projeto
-echo "Removendo pasta $DEPS_DIR..."
-rm -rf "$DEPS_DIR"
+# 3. Limpar ambiente temporário em /tmp
+echo "🗑️ Removendo ambiente temporário em $WORK_DIR..."
+rm -rf "$WORK_DIR"
 
-# 4. Limpeza profunda de caches (Maven, Pip, Conda, HoloClean)
-echo "Limpando caches de build e pacotes..."
-rm -rf ~/.m2/repository/*
-rm -rf ~/.cache/pip/*
-rm -rf ~/.cache/conda/*
-rm -rf ~/.cache/holoclean/*
-rm -rf ~/.cache/*
-
-# 5. Exibir cota final de disco
-echo "Cota de disco restante:"
-quota -v 2>/dev/null || true
-
-echo "Terraplanagem concluída!"
+echo "✅ Faxina concluída!"
+echo "📊 Status atual da tua cota de disco no DINF:"
+quota -s 2>/dev/null || quota 2>/dev/null || df -h "$HOME"
