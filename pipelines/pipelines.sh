@@ -65,6 +65,16 @@ if [ "$DATASET" = "hospital" ]; then
     HOSPITAL_DIRTY="$HOLOCLEAN_DIR/testdata/hospital.csv"
     GABARITO_REAL="$HOLOCLEAN_DIR/testdata/hospital_clean.csv"
     DATASET_ATUAL="$HOSPITAL_DIRTY"
+elif [ "$DATASET" = "adult" ]; then
+    DATASET_ATUAL="$HOLOCLEAN_DIR/testdata/AdultFull.csv"
+    # Se houver um gabarito limpo específico,ponha aqui. Caso contrário, aponte para o target ou ajuste:
+    GABARITO_REAL="$HOLOCLEAN_DIR/testdata/AdultFull.csv" # ajuste se tiver uma versão clean separada
+elif [ "$DATASET" = "flight" ]; then
+    DATASET_ATUAL="$HOLOCLEAN_DIR/testdata/flight.csv"
+    GABARITO_REAL="$HOLOCLEAN_DIR/testdata/flight_clean.csv"
+elif [ "$DATASET" = "met" ]; then
+    DATASET_ATUAL="$HOLOCLEAN_DIR/testdata/met_1000.csv"
+    GABARITO_REAL="$HOLOCLEAN_DIR/testdata/met_1000.csv"
 else
     echo "Erro: Base de dados '$DATASET' desconhecida."
     exit 1
@@ -116,10 +126,11 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         lima)
             LINES="5000"
             case $i in
-                1) SOUNDNESS="0.30" ;;
-                2) SOUNDNESS="0.20" ;;
-                3) SOUNDNESS="0.10" ;;
-                *) SOUNDNESS="0.05" ;;
+                1) SOUNDNESS="0.90" ;;
+                2) SOUNDNESS="0.80" ;;
+                3) SOUNDNESS="0.70" ;;
+                4) SOUNDNESS="0.60" ;;
+                *) SOUNDNESS="0.50" ;;
             esac
             IFILE="$(realpath "$DATASET_ATUAL" 2>/dev/null || echo "$DATASET_ATUAL")"
             cp "$IFILE" "$LIMA_DIR/hospital_temp.csv"
