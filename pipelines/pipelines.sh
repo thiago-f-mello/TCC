@@ -4,27 +4,28 @@ set -e
 DISCOVERY="$1"
 CLEANING="$2"
 DATASET="$3"
+MAX_ITERATIONS=10
+
+if [ "$4" = "-n" ] && [ -n "$5" ]; then
+    MAX_ITERATIONS="$5"
+fi
 
 if [ -z "$DISCOVERY" ] || [ -z "$CLEANING" ] || [ -z "$DATASET" ]; then
-    echo "Uso: $0 <ferramenta_descoberta> <ferramenta_limpeza> <base_de_dados>"
-    echo "  Descoberta: lima, dcfinder, fastdc, hydra"
-    echo "  Limpeza:    holoclean, uniclean, horizon"
-    echo "  Base:       hospital"
+    echo "Uso: $0 <ferramenta_descoberta> <ferramenta_limpeza> <base_de_dados> [-n max_iteracoes]"
     exit 1
 fi
 
 # ---------------------------------------------------------
-# 1. DETECÇÃO DE CAMINHOS E AMBIENTE (GENÉRICO)
+# 1. DETECÇÃO DE CAMINHOS E AMBIENTE (/tmp + árvore TCC)
 # ---------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-USER_HOME="$HOME"
+WORK_DIR="/tmp/$USER/tcc_env"
 
 CONDA_LOCATIONS=(
-    "$USER_HOME/miniconda/etc/profile.d/conda.sh"
-    "$USER_HOME/miniconda3/etc/profile.d/conda.sh"
-    "$USER_HOME/anaconda3/etc/profile.d/conda.sh"
-    "/opt/conda/etc/profile.d/conda.sh"
+    "$WORK_DIR/miniconda3/etc/profile.d/conda.sh"
+    "$HOME/miniconda3/etc/profile.d/conda.sh"
+    "$HOME/miniconda/etc/profile.d/conda.sh"
 )
 
 CONDA_PATH=""
@@ -35,48 +36,44 @@ for loc in "${CONDA_LOCATIONS[@]}"; do
     fi
 done
 
-if [ -z "$CONDA_PATH" ] && command -v conda &> /dev/null; then
-    CONDA_PATH="$(conda info --base)/etc/profile.d/conda.sh"
-fi
-
-if [ -n "$CONDA_PATH" ] && [ -f "$CONDA_PATH" ]; then
+if [ -n "$CONDA_PATH" ]; then
     source "$CONDA_PATH"
     conda activate db_env
 else
-    echo "Erro: Não foi possível localizar a instalação do Conda."
+    echo "Erro: Não foi possível localizar o Conda em $WORK_DIR/miniconda3."
     exit 1
 fi
 
-if [ -n "$CONDA_PREFIX" ]; then
-    export PGDATA="$CONDA_PREFIX/var/lib/pgsql/data"
-else
-    export PGDATA="$USER_HOME/miniconda/envs/db_env/var/lib/pgsql/data"
-fi
-
+export PGDATA="${CONDA_PREFIX}/var/lib/pgsql/data"
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32
 
 # --- SUBINDO POSTGRESQL ---
 "$ROOT_DIR/config/psql.sh"
 
-# --- CAMINHOS DOS DATASETS E FERRAMENTAS ---
-DCVALIDITY_DIR="${DCVALIDITY_DIR:-$ROOT_DIR/../DCValidity}"
-HOLOCLEAN_DIR="${HOLOCLEAN_DIR:-$ROOT_DIR/../holoclean}"
-LIMA_DIR="${LIMA_DIR:-$ROOT_DIR/../LIMA}"
+# --- CAMINHOS DOS DATASETS E DEPENDÊNCIAS EM /tmp ---
+JAR_DIR="$ROOT_DIR/algorithmJARs"
+DCVALIDITY_DIR="$WORK_DIR/deps/DCValidity"
+HOLOCLEAN_DIR="$WORK_DIR/deps/HoloClean"
+LIMA_DIR="$WORK_DIR/deps/LIMA"
+UNICLEAN_DIR="$WORK_DIR/deps/UniClean"
+HORIZON_DIR="$WORK_DIR/deps/Horizon"
+
+# Exporta PYTHONPATH para que o Python encontre o HoloClean/UniClean/Horizon em /tmp
+export PYTHONPATH="$HOLOCLEAN_DIR:$UNICLEAN_DIR:$HORIZON_DIR:$ROOT_DIR/src:$PYTHONPATH"
 
 if [ "$DATASET" = "hospital" ]; then
-    HOSPITAL_DIRTY="${HOSPITAL_DIRTY:-$HOLOCLEAN_DIR/testdata/hospital.csv}"
-    GABARITO_REAL="${GABARITO_REAL:-$HOLOCLEAN_DIR/testdata/hospital_clean.csv}"
+    HOSPITAL_DIRTY="$HOLOCLEAN_DIR/testdata/hospital.csv"
+    GABARITO_REAL="$HOLOCLEAN_DIR/testdata/hospital_clean.csv"
     DATASET_ATUAL="$HOSPITAL_DIRTY"
 else
     echo "Erro: Base de dados '$DATASET' desconhecida."
     exit 1
 fi
 
-MAX_ITERATIONS=10
 mkdir -p "$ROOT_DIR/dcs/raw" "$ROOT_DIR/dcs/processed"
 
 echo "============================================================"
-echo "Iniciando Pipeline: Descoberta[$DISCOVERY] + Limpeza[$CLEANING] ($DATASET)"
+echo "Iniciando Pipeline: Descoberta[$DISCOVERY] + Limpeza[$CLEANING] ($DATASET) | Max Iter: $MAX_ITERATIONS"
 echo "============================================================"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
@@ -86,22 +83,23 @@ for i in $(seq 1 $MAX_ITERATIONS); do
 
     RAW_DC="$ROOT_DIR/dcs/raw/dcs_${DISCOVERY}_${i}.txt"
     PARSED_DC="$ROOT_DIR/dcs/raw/dcs_${DISCOVERY}_parsed_${i}.txt"
-    FILTERED_DC="$ROOT_DIR/dcs/processed/dcs_${DISCOVERY}_filtered_${i}.txt"
 
-# --- PASSO 1: DESCOBERTA DE DCs E PARSER ---
+    # --- PASSO 1: DESCOBERTA DE DCs E PARSER ---
     case "$DISCOVERY" in
         dcfinder)
             LINES="5000"
             cd "$DCVALIDITY_DIR"
-            java -jar "$DCVALIDITY_DIR/algorithmJARs/DCFinder.jar" "$DATASET_ATUAL" 0.00 "$LINES"
-            [ -f "output.txt" ] && mv output.txt "$RAW_DC" || { echo "Erro: DCFinder não gerou output.txt"; exit 1; }
+            rm -f output.txt
+            java -jar "$JAR_DIR/dcfinder.jar" "$DATASET_ATUAL" 0.00 "$LINES"
+            [ -f "output.txt" ] && mv output.txt "$RAW_DC" || { echo "Erro: dcfinder não gerou output.txt"; exit 1; }
             cd "$ROOT_DIR"
             python3 "$ROOT_DIR/src/parsers/meta_parser.py" "$RAW_DC" "$PARSED_DC" "$DATASET_ATUAL"
             ;;
         fastdc)
             LINES="100"
             cd "$DCVALIDITY_DIR"
-            java -jar "$DCVALIDITY_DIR/algorithmJARs/FastDC.jar" "$DATASET_ATUAL" 0.00 "$LINES"
+            rm -f output.txt
+            java -jar "$JAR_DIR/FastDC.jar" "$DATASET_ATUAL" 0.00 "$LINES"
             [ -f "output.txt" ] && mv output.txt "$RAW_DC" || { echo "Erro: FastDC não gerou output.txt"; exit 1; }
             cd "$ROOT_DIR"
             python3 "$ROOT_DIR/src/parsers/meta_parser.py" "$RAW_DC" "$PARSED_DC" "$DATASET_ATUAL"
@@ -109,7 +107,8 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         hydra)
             LINES="3000"
             cd "$DCVALIDITY_DIR"
-            java -jar "$DCVALIDITY_DIR/algorithmJARs/hydra.jar" "$DATASET_ATUAL" 0.00 "$LINES"
+            rm -f output.txt
+            java -jar "$JAR_DIR/hydra.jar" "$DATASET_ATUAL" 0.00 "$LINES"
             [ -f "output.txt" ] && mv output.txt "$RAW_DC" || { echo "Erro: Hydra não gerou output.txt"; exit 1; }
             cd "$ROOT_DIR"
             python3 "$ROOT_DIR/src/parsers/meta_parser.py" "$RAW_DC" "$PARSED_DC" "$DATASET_ATUAL"
@@ -117,15 +116,15 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         lima)
             LINES="5000"
             case $i in
-                1) SOUNDNESS="0.50" ;;
-                2) SOUNDNESS="0.40" ;;
-                3) SOUNDNESS="0.30" ;;
-                4) SOUNDNESS="0.20" ;;
-                *) SOUNDNESS="0.10" ;;
+                1) SOUNDNESS="0.30" ;;
+                2) SOUNDNESS="0.20" ;;
+                3) SOUNDNESS="0.10" ;;
+                *) SOUNDNESS="0.05" ;;
             esac
             IFILE="$(realpath "$DATASET_ATUAL" 2>/dev/null || echo "$DATASET_ATUAL")"
             cp "$IFILE" "$LIMA_DIR/hospital_temp.csv"
             cd "$LIMA_DIR"
+            rm -f output.txt
             java -jar "$LIMA_DIR/target/LIMA-0.1.jar" "hospital_temp.csv" "$SOUNDNESS" "$LINES"
             rm -f "hospital_temp.csv"
             [ -s "output.txt" ] && cp "output.txt" "$RAW_DC" || { echo "Erro: LIMA não gerou output.txt"; exit 1; }
@@ -138,7 +137,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
             ;;
     esac
 
-    # --- PASSO 2: REPARO / LIMPEZA DIRETO COM O PARSED_DC ---
+    # --- PASSO 2: REPARO / LIMPEZA ---
     SAIDA_CSV="$ROOT_DIR/dcs/processed/${DATASET}_limpo_${DISCOVERY}_${CLEANING}_v${i}.csv"
 
     set +e
@@ -166,7 +165,6 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     STATUS=$?
     set -e
 
-    # Checagem de Early Stopping (Estabilidade)
     if [ $STATUS -eq 0 ] && cmp -s "$DATASET_ATUAL" "$SAIDA_CSV"; then
         STATUS=10
     fi

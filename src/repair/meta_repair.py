@@ -1,6 +1,12 @@
+from metrics import avaliar_reparo
 import sys
 import os
 import gc
+import time
+
+if not hasattr(time, 'clock'):
+    time.clock = time.perf_counter
+
 from pathlib import Path
 import pandas as pd
 import torch
@@ -8,10 +14,11 @@ import torch
 # Captura a raiz do repositório dinamicamente (2 níveis acima de src/repair/)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Tenta carregar o HoloClean do ambiente ou via diretório relativo[cite: 13]
+# Tenta carregar o HoloClean do ambiente, /tmp ou diretório relativo
+DEFAULT_TMP_HC = f"/tmp/{os.environ.get('USER', 'tfm22')}/tcc_env/deps/HoloClean"
 HOLOCLEAN_PATH = os.environ.get(
-    'HOLOCLEAN_DIR', 
-    str((ROOT_DIR.parent / "holoclean").resolve())
+    'HOLOCLEAN_DIR',
+    DEFAULT_TMP_HC if os.path.isdir(DEFAULT_TMP_HC) else str((ROOT_DIR.parent / "holoclean").resolve())
 )
 
 if HOLOCLEAN_PATH not in sys.path:
@@ -20,7 +27,6 @@ if HOLOCLEAN_PATH not in sys.path:
 import holoclean
 from detect import NullDetector, ViolationDetector
 from repair.featurize import *
-
 
 def executar_limpeza(caminho_dcs, caminho_saida, caminho_entrada, caminho_gabarito):
     try:
@@ -33,7 +39,7 @@ def executar_limpeza(caminho_dcs, caminho_saida, caminho_entrada, caminho_gabari
             print(" -> [AVISO] CUDA não disponível. Executando em modo CPU de thread única.")
             torch.set_num_threads(1)
 
-        # 1. Configuração do HoloClean otimizada para o pipeline[cite: 13]
+        # 1. Configuração do HoloClean otimizada para o pipeline
         hc = holoclean.HoloClean(
             db_name='holo',
             domain_thresh_1=0.05,
@@ -60,6 +66,12 @@ def executar_limpeza(caminho_dcs, caminho_saida, caminho_entrada, caminho_gabari
 
         hc.load_dcs(caminho_dcs)
         dcs = hc.get_dcs()
+        if not dcs:
+            print("\n[EARLY SHUTDOWN] Nenhuma DC carregada nesta iteração.")
+            Path(caminho_saida).resolve().parent.mkdir(parents=True, exist_ok=True)
+            pd.read_csv(caminho_entrada).to_csv(caminho_saida, index=False)
+            sys.exit(10)
+
         hc.ds.set_constraints(dcs)
 
         detectors = [NullDetector(), ViolationDetector()]
@@ -67,60 +79,55 @@ def executar_limpeza(caminho_dcs, caminho_saida, caminho_entrada, caminho_gabari
 
         try:
             hc.setup_domain()
-            
+
             featurizers = [
                 InitAttrFeaturizer(),
                 OccurAttrFeaturizer(),
                 FreqFeaturizer(),
                 ConstraintFeaturizer(),
             ]
-            
-            # Limpeza preventiva da RAM antes da featurização e treino[cite: 13]
+
+            # Limpeza preventiva da RAM antes da featurização e treino
             gc.collect()
             if use_cuda:
                 torch.cuda.empty_cache()
 
             hc.repair_errors(featurizers)
 
-            # Limpeza de memória antes da avaliação (evita o crash posix_memalign)[cite: 13]
+            # Limpeza de memória antes da avaliação (evita o crash posix_memalign)
             gc.collect()
             if use_cuda:
                 torch.cuda.empty_cache()
-
-            print(f"Avaliando contra: {caminho_gabarito}")
-            hc.evaluate(fpath=caminho_gabarito,
-                        tid_col='tid',
-                        attr_col='attribute',
-                        val_col='correct_val')
 
             print("Gerando o dataset reparado...")
             hc.ds.get_inferred_values()
             hc.ds.get_repaired_dataset()
 
             df_final = hc.ds.repaired_data.df
-
-            # Verifica quantas células foram realmente modificadas[cite: 13]
             df_entrada = pd.read_csv(caminho_entrada)
-            
-            # Remove colunas internas do gerenciamento do banco[cite: 13]
+
+            # Remove colunas internas do gerenciamento do banco
             cols_para_remover = ['_tid_', 'tid', 'attribute', 'correct_val']
             for col in cols_para_remover:
                 if col in df_final.columns:
                     df_final = df_final.drop(columns=[col])
 
+            # Avaliação oficial nativa do HoloClean
+            avaliar_reparo(hc, caminho_gabarito)
+            
             # Garante a existência do diretório de saída antes de salvar
             Path(caminho_saida).resolve().parent.mkdir(parents=True, exist_ok=True)
 
-            # Salva o arquivo limpo desta iteração[cite: 13]
+            # Salva o arquivo limpo desta iteração
             df_final.to_csv(caminho_saida, index=False)
             print(f"Sucesso! Iteração salva em: {caminho_saida}")
-            
-            # CRITÉRIO DE PARADA REAL[cite: 13]
-            if df_final.equals(df_entrada):
+
+            # CRITÉRIO DE PARADA REAL
+            if df_final.astype(str).equals(df_entrada.astype(str)):
                 print("\n[INFO] O dataset final é idêntico ao de entrada. Nenhuma alteração feita.")
-                sys.exit(10)  # Código 10 ativa o Early Stopping no Shell[cite: 13]
+                sys.exit(10)  # Código 10 ativa o Early Stopping no Shell
             else:
-                sys.exit(0)   # Continua o pipeline[cite: 13]
+                sys.exit(0)   # Continua o pipeline
 
         except ValueError as e:
             if "No objects to concatenate" in str(e):

@@ -44,15 +44,22 @@ set -e
 
 export PIP_CACHE_DIR="$WORK_DIR/pip_cache"
 pip install -q torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
-pip install -q pandas numpy psycopg2-binary scikit-learn
+pip install -q "sqlalchemy<2.0" pyitlib python-Levenshtein gensim editdistance future pandas numpy psycopg2-binary scikit-learn scipy networkx tqdm pulp
 
-# 5. Clonar repositórios em /tmp/deps
+# 5. Clonar repositórios em /tmp/deps (incluindo UniClean e Horizon)
 cd "$DEPS_DIR"
 echo "📂 Clonando repositórios oficiais em /tmp..."
 [ ! -d "LIMA" ] && git clone -q https://github.com/NoSocAlgroc/LIMA.git
 [ ! -d "HoloClean" ] && git clone -q https://github.com/HoloClean/HoloClean.git
+[ ! -d "UniClean" ] && git clone -q https://github.com/qzkinhit/UniClean-bench-Result.git UniClean
+[ ! -d "Horizon" ] && git clone -q https://github.com/D2IP-TUB/Horizon.git
 [ ! -d "metanome" ] && git clone -q https://github.com/HPI-Information-Systems/metanome.git
 [ ! -d "DCValidity" ] && git clone -q https://github.com/NoSocAlgroc/DCValidity.git
+
+# Instalar requirements específicos do HoloClean, UniClean e Horizon (com fallback seguro)
+[ -f "$DEPS_DIR/HoloClean/requirements.txt" ] && pip install -q -r "$DEPS_DIR/HoloClean/requirements.txt" || true
+[ -f "$DEPS_DIR/UniClean/requirements.txt" ] && pip install -q -r "$DEPS_DIR/UniClean/requirements.txt" || true
+[ -f "$DEPS_DIR/Horizon/requirements.txt" ] && pip install -q -r "$DEPS_DIR/Horizon/requirements.txt" || true
 
 # 6. Configurar Maven para usar /tmp/m2_repo e liberar Lombok no JDK 17
 export MAVEN_OPTS="--add-opens jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED --add-opens jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-opens jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-opens jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED"
@@ -87,7 +94,7 @@ for alg in FastDC hydra dcfinder; do
 done
 
 echo ""
-echo "✅ Tudo pronto, piá! JARs salvos em: $JAR_DIR"
+echo "✅ Tudo pronto, piá! Ambiente completo com HoloClean, UniClean e Horizon montado."
 ls -lh "$JAR_DIR"
 echo "👉 Para ativar o ambiente neste terminal, rode:"
 echo "   source $MINICONDA_DIR/bin/activate db_env"
